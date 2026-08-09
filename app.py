@@ -102,22 +102,17 @@ def forecast(series_df, item_id, store_id, horizon, promo_discount=0.0):
     return pd.DataFrame(preds)
 
 series = get_series(item, store)
+recent_sales = series["units"].tail(28).sum()
+if recent_sales < 5:
+    st.warning(f"⚠ Only {int(recent_sales)} units sold in the last 28 days — "
+               "this product may be delisted or out of stock here. "
+               "The forecast reflects that inactivity.")
 fc = forecast(series, item, store, horizon, 0.10 if promo else 0.0)
 
 # ---------- main ----------
 st.title("Demand Forecasting Tool")
 st.caption(f"LightGBM quantile forecasts · 100 products × 3 CA stores · "
            f"SQLite on-demand queries · viewing {item} @ {store}")
-
-recent = series.tail(60)
-fig, ax = plt.subplots(figsize=(14, 4))
-ax.plot(recent["date"], recent["units"], label="history")
-ax.plot(fc["date"], fc["q50"], label="forecast (median)", linewidth=2)
-ax.fill_between(fc["date"], fc["q10"], fc["q90"], alpha=0.2, label="10th-90th pct")
-ax.legend(); ax.set_title(f"{item} — {store}")
-st.pyplot(fig)
-st.caption("Calibration: 85.6% one-step coverage vs 80% nominal across 300 series; "
-           "recursive multi-day coverage runs lower as uncertainty compounds.")
 
 total_demand = fc["q50"].sum()
 order_at_service = fc["q90"].sum()
@@ -126,3 +121,88 @@ c1, c2, c3 = st.columns(3)
 c1.metric("Expected demand (median)", f"{total_demand:,.0f} units")
 c2.metric("Safety buffer", f"{safety_stock:,.0f} units")
 c3.metric("Order for ~90% service", f"{order_at_service:,.0f} units")
+
+tab_fc, tab_bt, tab_pf = st.tabs(["📈 Forecast", "🔬 Backtest", "🏪 Store portfolio"])
+
+with tab_fc:
+    recent = series.tail(60)
+    fig, ax = plt.subplots(figsize=(14, 4))
+    ax.plot(recent["date"], recent["units"], label="history")
+    ax.plot(fc["date"], fc["q50"], label="forecast (median)", linewidth=2)
+    ax.fill_between(fc["date"], fc["q10"], fc["q90"], alpha=0.2, label="10th-90th pct")
+    ax.legend(); ax.set_title(f"{item} — {store}")
+    st.pyplot(fig)
+    st.caption("Calibration: 85.6% one-step coverage vs 80% nominal across 300 series; "
+            "recursive multi-day coverage runs lower as uncertainty compounds.")
+
+    st.markdown("**How did the model do on the last 28 days it never saw?** "
+                "Trained on data up to 28 days before the end, then forecast "
+                "recursively — same conditions as a real forecast.")
+
+with tab_bt:
+    bt_train = series.iloc[:-28]
+    bt_actual = series.iloc[-28:]
+    bt_fc = forecast(bt_train, item, store, 28, 0.0)
+
+    bt_mae = float(np.mean(np.abs(bt_actual["units"].values - bt_fc["q50"].values)))
+    naive_bt = np.tile(bt_train["units"].tail(7).values, 4)[:28]
+    bt_naive_mae = float(np.mean(np.abs(bt_actual["units"].values - naive_bt)))
+    bt_cov = float(np.mean((bt_actual["units"].values >= bt_fc["q10"].values) &
+                           (bt_actual["units"].values <= bt_fc["q90"].values)))
+
+    b1, b2, b3 = st.columns(3)
+    b1.metric("Model MAE", f"{bt_mae:.2f}")
+    b2.metric("vs naive",
+              f"{(bt_naive_mae - bt_mae) / bt_naive_mae:+.0%}" if bt_naive_mae > 0 else "n/a",
+              help="Positive = model beats copying last week")
+    b3.metric("Band coverage", f"{bt_cov:.0%}", help="Nominal 80%")
+
+    fig2, ax2 = plt.subplots(figsize=(14, 4))
+    ax2.plot(bt_actual["date"], bt_actual["units"], label="actual", marker="o")
+    ax2.plot(bt_fc["date"], bt_fc["q50"], label="model forecast", linewidth=2)
+    ax2.plot(bt_fc["date"], naive_bt, label="naive", linestyle="--", alpha=0.7)
+    ax2.fill_between(bt_fc["date"], bt_fc["q10"], bt_fc["q90"], alpha=0.15)
+    ax2.legend(); ax2.set_title("Held-out 28 days: forecast vs reality")
+    st.pyplot(fig2)
+
+with tab_pf:
+    @st.cache_data
+    def store_overview(store_id):
+        con = sqlite3.connect(DB_PATH)
+        q = """
+        WITH bounds AS (SELECT MAX(date) AS max_d FROM sales)
+        SELECT s.item_id,
+               SUM(CASE WHEN s.date >= date(b.max_d, '-28 days')
+                        THEN s.units ELSE 0 END) AS last_28,
+               SUM(CASE WHEN s.date >= date(b.max_d, '-56 days')
+                         AND s.date <  date(b.max_d, '-28 days')
+                        THEN s.units ELSE 0 END) AS prev_28
+        FROM sales s CROSS JOIN bounds b
+        WHERE s.store_id = ?
+        GROUP BY s.item_id
+        ORDER BY last_28 DESC
+        """
+        df = pd.read_sql(q, con, params=[store_id])
+        con.close()
+        df[["last_28", "prev_28"]] = df[["last_28", "prev_28"]].fillna(0)
+        df["trend"] = (df["last_28"] - df["prev_28"]) / df["prev_28"].replace(0, np.nan)
+        return df
+        
+
+    ov = store_overview(store)
+    st.markdown(f"**{store}: last 28 days vs the 28 before**")
+
+    p1, p2 = st.columns(2)
+    p1.metric("Store volume, last 28d", f"{int(ov['last_28'].sum()):,} units",
+              f"{(ov['last_28'].sum() - ov['prev_28'].sum()) / ov['prev_28'].sum():+.1%}")
+    p2.metric("Active products (>5 units)", f"{(ov['last_28'] > 5).sum()} / {len(ov)}")
+
+    st.markdown("**Top 10 by volume**")
+    st.dataframe(ov.head(10).style.format({"last_28": "{:,.0f}", "prev_28": "{:,.0f}",
+                                           "trend": "{:+.1%}"}), use_container_width=True)
+    st.markdown("**Biggest movers (min 50 units)**")
+    movers = ov[ov["prev_28"] >= 50].nlargest(5, "trend")
+    droppers = ov[ov["prev_28"] >= 50].nsmallest(5, "trend")
+    st.dataframe(pd.concat([movers, droppers]).style.format(
+        {"last_28": "{:,.0f}", "prev_28": "{:,.0f}", "trend": "{:+.1%}"}),
+        use_container_width=True)
