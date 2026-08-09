@@ -3,7 +3,7 @@
 End-to-end demand forecasting for retail: SQLite data layer, LightGBM quantile models,
 and a deployed planning app with built-in backtesting.
 
-**Live app:** https://YOUR-APP-URL.streamlit.app
+**Live app:** https://demand-forecast-9pwroxcsikhv99ski78qld.streamlit.app
 **Stack:** Python, SQL (SQLite), LightGBM, Optuna, Streamlit, pandas
 
 ![App screenshot](screenshots/app_main.png)
