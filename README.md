@@ -6,7 +6,10 @@ and a deployed planning app with built-in backtesting.
 **Live app:** https://demand-forecast-9pwroxcsikhv99ski78qld.streamlit.app
 **Stack:** Python, SQL (SQLite), LightGBM, Optuna, Streamlit, pandas
 
-![App screenshot](screenshots/app_main.png)
+![App screenshot](Screenshots/app_main.png)
+![Backtest tab](Screenshots/backtest.png)
+![Store portfolio](screenshots/portfolio_1.png)
+![Store portfolio](screenshots/portfolio_2.png)
 
 ## What it does
 
