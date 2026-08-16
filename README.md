@@ -77,3 +77,8 @@ Future holidays are not fed into the forecast yet, promo effects come only throu
 price features, and recursive intervals are slightly overconfident. Next steps would
 be conformal calibration for the bands, per-horizon models, and expanding beyond the
 top-100 scope where Tweedie should earn its keep.
+
+Feeding known future event flags into the recursive forecast slightly degraded accuracy
+(3.10 to 3.15 MAE on a 20-series sample), likely because a single binary flag conflates
+events with opposite demand effects, such as Christmas closures versus Super Bowl spikes.
+Encoding event type and days-to-next-event is the next step.
