@@ -8,8 +8,8 @@ and a deployed planning app with built-in backtesting.
 
 ![App screenshot](Screenshots/app_main.png)
 ![Backtest tab](Screenshots/backtest.png)
-![Store portfolio](screenshots/portfolio_1.png)
-![Store portfolio](screenshots/portfolio_2.png)
+![Store portfolio](Screenshots/portfolio_1.png)
+![Store portfolio](Screenshots/portfolio_2.png)
 
 ## What it does
 
